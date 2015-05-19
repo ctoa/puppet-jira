@@ -41,10 +41,55 @@ class jira::install {
   }
 
   $file = "atlassian-${jira::product}-${jira::version}.${jira::format}"
-  if $jira::staging_or_deploy == 'staging' {
+  if $jira::deployment_type == 'download' {
+    if $jira::staging_or_deploy == 'staging' {
 
-    require staging
+      require staging
 
+      if ! defined(File[$jira::webappdir]) {
+        file { $jira::webappdir:
+          ensure => 'directory',
+          owner  => $jira::user,
+          group  => $jira::group,
+        }
+      }
+
+      staging::file { $file:
+        source  => "${jira::downloadURL}/${file}",
+        timeout => 1800,
+      } ->
+
+      staging::extract { $file:
+        target  => $jira::webappdir,
+        creates => "${jira::webappdir}/conf",
+        strip   => 1,
+        user    => $jira::user,
+        group   => $jira::group,
+        notify  => Exec["chown_${jira::webappdir}"],
+        before  => File[$jira::homedir],
+        require => [
+          File[$jira::installdir],
+          User[$jira::user],
+          File[$jira::webappdir] ],
+      }
+    } elsif $jira::staging_or_deploy == 'deploy' {
+
+      deploy::file { $file:
+        target          => $jira::webappdir,
+        url             => $jira::downloadURL,
+        strip           => true,
+        download_timout => 1800,
+        owner           => $jira::user,
+        group           => $jira::group,
+        notify          => Exec["chown_${jira::webappdir}"],
+        before          => File[$jira::homedir],
+        require         => [ File[$jira::installdir], User[$jira::user] ],
+      }
+
+    } else {
+      fail('staging_or_deploy must equal "staging" or "deploy"')
+    }
+  } elsif $jira::deployment_type == 'rpm' {
     if ! defined(File[$jira::webappdir]) {
       file { $jira::webappdir:
         ensure => 'directory',
@@ -53,40 +98,29 @@ class jira::install {
       }
     }
 
-    staging::file { $file:
-      source  => "${jira::downloadURL}/${file}",
-      timeout => 1800,
-    } ->
+    if $jira::package_release_tag {
+      $package_version = "${jira::version}-${jira::package_release_tag}"
+    } else {
+      $package_version = $jira::version
+    }
 
-    staging::extract { $file:
-      target  => $jira::webappdir,
-      creates => "${jira::webappdir}/conf",
-      strip   => 1,
-      user    => $jira::user,
-      group   => $jira::group,
-      notify  => Exec["chown_${jira::webappdir}"],
-      before  => File[$jira::homedir],
+    package { 'jira':
+      ensure  => $package_version,
+      name    => $jira::package_name,
       require => [
-        File[$jira::installdir],
         User[$jira::user],
-        File[$jira::webappdir] ],
-    }
-  } elsif $jira::staging_or_deploy == 'deploy' {
-
-    deploy::file { $file:
-      target          => $jira::webappdir,
-      url             => $jira::downloadURL,
-      strip           => true,
-      download_timout => 1800,
-      owner           => $jira::user,
-      group           => $jira::group,
-      notify          => Exec["chown_${jira::webappdir}"],
-      before          => File[$jira::homedir],
-      require         => [ File[$jira::installdir], User[$jira::user] ],
+        Group[$jira::group],
+      ]
     }
 
+    exec { 'upgrade jira':
+      command     => 'chkconfig jira && service jira stop',
+      refreshonly => true,
+      subscribe   => File[$::jira::webappdir],
+      before      => Package['jira'],
+    }
   } else {
-    fail('staging_or_deploy must equal "staging" or "deploy"')
+    fail('deployment_type must equal "download" or "rpm"')
   }
 
   file { $jira::homedir:

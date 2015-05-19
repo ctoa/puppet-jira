@@ -83,6 +83,12 @@ class jira (
   # Defaults to nanliu-staging as it is puppetlabs approved.
   $staging_or_deploy = 'staging',
 
+  # Choose whether to use $staging_or_deploy style deployment,
+  # or using a rpm package for deployment.
+  $deployment_type = 'download',
+  $package_name = 'jira',
+  $package_release_tag = undef,
+
   # Manage service
   $service_manage = true,
   $service_ensure = running,
